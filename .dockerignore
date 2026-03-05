@@ -1,0 +1,10 @@
+.env
+.env.example
+.git
+.gitignore
+README.md
+USAGE.md
+docker-compose.yml
+docker-compose.example.yml
+Dockerfile
+*.md

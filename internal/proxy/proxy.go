@@ -18,6 +18,34 @@ type Provider struct {
 	APIKey  string
 }
 
+// Usage tracks token consumption for OpenCode
+type Usage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
+// ChatCompletionResponse ensures usage field is preserved
+type ChatCompletionResponse struct {
+	ID      string          `json:"id"`
+	Object  string          `json:"object"`
+	Created int64           `json:"created"`
+	Model   string          `json:"model"`
+	Choices []Choice        `json:"choices"`
+	Usage   *Usage          `json:"usage,omitempty"`
+}
+
+type Choice struct {
+	Index        int     `json:"index"`
+	Message      Message `json:"message"`
+	FinishReason string  `json:"finish_reason"`
+}
+
+type Message struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
 func NewRelayProxy(p Provider, rules string, rdb *cache.Cache) (*httputil.ReverseProxy, error) {
 	target, err := url.Parse(p.BaseURL)
 	if err != nil {
@@ -54,6 +82,16 @@ func NewRelayProxy(p Provider, rules string, rdb *cache.Cache) (*httputil.Revers
 		if err != nil {
 			return nil
 		}
+
+		// Parse to verify usage field is present
+		var apiResp ChatCompletionResponse
+		if err := json.Unmarshal(body, &apiResp); err == nil && apiResp.Usage != nil {
+			log.Printf("[TOKENS] prompt=%d completion=%d total=%d",
+				apiResp.Usage.PromptTokens,
+				apiResp.Usage.CompletionTokens,
+				apiResp.Usage.TotalTokens)
+		}
+
 		resp.Body = io.NopCloser(bytes.NewBuffer(body))
 
 		go func(key string, data string) {
@@ -101,6 +139,16 @@ func HandlerWrapper(proxy *httputil.ReverseProxy, rdb *cache.Cache, rules string
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("X-Cache", "HIT")
 			log.Printf("[HIT] %s %s", r.Method, r.URL.Path)
+			
+			// Verify cached response has usage
+			var cachedResp ChatCompletionResponse
+			if err := json.Unmarshal([]byte(cachedVal), &cachedResp); err == nil && cachedResp.Usage != nil {
+				log.Printf("[TOKENS-CACHED] prompt=%d completion=%d total=%d",
+					cachedResp.Usage.PromptTokens,
+					cachedResp.Usage.CompletionTokens,
+					cachedResp.Usage.TotalTokens)
+			}
+			
 			w.Write([]byte(cachedVal))
 			return
 		}
