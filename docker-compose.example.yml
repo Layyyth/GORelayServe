@@ -1,17 +1,9 @@
 version: '3.8'
 
 services:
-  redis:
-    image: redis:7-alpine
-    container_name: relay_cache
-    restart: always
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-
+  # Go Relay App (pre-built image)
   relay:
-    image: gorelayserve-relay:latest
+    image: your-registry/gorelay:latest
     container_name: go_relay
     restart: always
     ports:
@@ -19,12 +11,5 @@ services:
     environment:
       - LLM_PROVIDER_URL=${LLM_PROVIDER_URL}
       - LLM_PROVIDER_KEY=${LLM_PROVIDER_KEY}
-      - REDIS_ADDR=redis:6379
+      - REDIS_ADDR=${REDIS_ADDR:-localhost:6379}
       - RELAY_PORT=8080
-    depends_on:
-      - redis
-    volumes:
-      - ./coding_rules:/app/coding_rules
-
-volumes:
-  redis_data:

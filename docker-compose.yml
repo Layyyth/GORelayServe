@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  relay:
+    build: .
+    container_name: go_relay
+    restart: always
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    # If Redis is on your host machine, use host networking:
+    # network_mode: host

@@ -3,7 +3,6 @@ package main
 import (
 	"GoRelayServe/internal/cache"
 	"GoRelayServe/internal/proxy"
-	"GoRelayServe/internal/rules"
 	"fmt"
 	"log"
 	"net/http"
@@ -13,14 +12,16 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// loggingMiddleware logs all incoming requests
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("[REQUEST] %s %s from %s (User-Agent: %s)", r.Method, r.URL.Path, r.RemoteAddr, r.UserAgent())
+		next.ServeHTTP(w, r)
+	})
+}
+
 func main() {
 	_ = godotenv.Load()
-
-	rulesContext, err := rules.LoadRules("./coding_rules")
-	if err != nil {
-		log.Printf("rules load failure: %v", err)
-		rulesContext = ""
-	}
 
 	llmProvider := proxy.Provider{
 		BaseURL: os.Getenv("LLM_PROVIDER_URL"),
@@ -37,14 +38,21 @@ func main() {
 	}
 	rdb := cache.NewCache(redisAddr)
 
-	relayProxy, err := proxy.NewRelayProxy(llmProvider, rulesContext, rdb)
+	relayProxy, err := proxy.NewRelayProxy(llmProvider, rdb)
 	if err != nil {
 		log.Fatalf("proxy init failed: %v", err)
 	}
 
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/v1/chat/completions", proxy.HandlerWrapper(relayProxy, rdb, rulesContext))
+	// OpenAI-compatible endpoint
+	mux.HandleFunc("/v1/chat/completions", proxy.HandlerWrapper(relayProxy, rdb))
+
+	// Anthropic Messages API endpoint (for Claude Code)
+	mux.HandleFunc("/v1/messages", proxy.AnthropicHandler(relayProxy, rdb))
+
+	// Anthropic Models API endpoint (for Claude Code model validation)
+	mux.HandleFunc("/v1/models", proxy.AnthropicModelsHandler())
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -58,12 +66,15 @@ func main() {
 
 	server := &http.Server{
 		Addr:         ":" + port,
-		Handler:      mux,
+		Handler:      loggingMiddleware(mux),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 5 * time.Minute,
 	}
 
 	fmt.Printf("10x relay listening on :%s\n", port)
+	fmt.Printf("OpenAI endpoint: /v1/chat/completions\n")
+	fmt.Printf("Anthropic endpoint: /v1/messages (Claude Code compatible)\n")
+
 	if err := server.ListenAndServe(); err != nil {
 		log.Fatalf("server failure: %s", err)
 	}
