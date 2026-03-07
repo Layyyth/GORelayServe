@@ -3,7 +3,7 @@ version: '3.8'
 services:
   # Go Relay App (pre-built image)
   relay:
-    image: your-registry/gorelay:latest
+    image: laithaj/gorelayserve:latest
     container_name: go_relay
     restart: always
     ports:
