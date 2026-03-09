@@ -41,13 +41,13 @@ type AnthropicUsage struct {
 
 // Model mapping: Anthropic model names -> Together AI model names
 var modelMapping = map[string]string{
-	"claude-3-5-sonnet-20241022":     "Qwen/Qwen3-Next-80B-A3B-Instruct",
-	"claude-3-5-sonnet-latest":       "Qwen/Qwen3-Next-80B-A3B-Instruct",
-	"claude-3-opus-20240229":         "Qwen/Qwen3-Next-80B-A3B-Instruct",
-	"claude-3-haiku-20240307":        "Qwen/Qwen3-Next-80B-A3B-Instruct",
-	"claude-3-7-sonnet-20250219":     "Qwen/Qwen3-Next-80B-A3B-Instruct",
-	"claude-sonnet-4-20250514":       "Qwen/Qwen3-Next-80B-A3B-Instruct",
-	"Sonnet 4":                       "Qwen/Qwen3-Next-80B-A3B-Instruct",
+	"claude-3-5-sonnet-20241022":     "deepseek-ai/DeepSeek-V3.1",
+	"claude-3-5-sonnet-latest":       "deepseek-ai/DeepSeek-V3.1",
+	"claude-3-opus-20240229":         "deepseek-ai/DeepSeek-V3.1",
+	"claude-3-haiku-20240307":        "deepseek-ai/DeepSeek-V3.1",
+	"claude-3-7-sonnet-20250219":     "deepseek-ai/DeepSeek-V3.1",
+	"claude-sonnet-4-20250514":       "deepseek-ai/DeepSeek-V3.1",
+	"Sonnet 4":                       "deepseek-ai/DeepSeek-V3.1",
 }
 
 // mapModel converts Anthropic model names to Together AI model names
