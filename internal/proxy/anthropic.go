@@ -392,12 +392,17 @@ func handleAnthropicStreaming(w http.ResponseWriter, r *http.Request, body []byt
 	}
 	writeSSE(w, contentStart)
 
-	// Forward to OpenAI streaming and translate
-	req, _ := http.NewRequest("POST", "http://localhost:8080/v1/chat/completions", bytes.NewReader(body))
+	// Forward to OpenAI streaming and translate through proxy
+	req, _ := http.NewRequest("POST", "http://placeholder/v1/chat/completions", bytes.NewReader(body))
 	req.Header = r.Header.Clone()
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept-Encoding", "identity")
+	
+	// Use proxy's director to set up the request
+	if proxy.Director != nil {
+		proxy.Director(req)
+	}
 
-	// Make request through proxy
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
