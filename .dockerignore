@@ -7,4 +7,7 @@ USAGE.md
 docker-compose.yml
 docker-compose.example.yml
 Dockerfile
-*.md
+CLAUDE_CODE_INTEGRATION.md
+README.md
+USAGE.md
+TEAM_SETUP.md

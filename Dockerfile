@@ -7,5 +7,6 @@ RUN go build -o relay ./cmd/relay/main.go
 FROM alpine:latest
 WORKDIR /app
 COPY --from=builder /app/relay .
+COPY --from=builder /app/rules.md .
 EXPOSE 8080
 CMD ["./relay"]

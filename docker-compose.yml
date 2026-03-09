@@ -1,6 +1,15 @@
 version: '3.8'
 
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: relay_cache
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
   relay:
     image: laithaj/gorelayserve:latest
     container_name: go_relay
@@ -9,5 +18,12 @@ services:
       - "8080:8080"
     env_file:
       - .env
-    # For Linux users with local Redis, uncomment:
-    # network_mode: host
+    environment:
+      - REDIS_ADDR=redis:6379
+    volumes:
+      - ./rules.md:/app/rules.md:ro
+    depends_on:
+      - redis
+
+volumes:
+  redis_data:

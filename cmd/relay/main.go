@@ -12,10 +12,9 @@ import (
 	"github.com/joho/godotenv"
 )
 
-// loggingMiddleware logs all incoming requests
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("[REQUEST] %s %s from %s (User-Agent: %s)", r.Method, r.URL.Path, r.RemoteAddr, r.UserAgent())
+		log.Printf("[%s] %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
 		next.ServeHTTP(w, r)
 	})
 }
@@ -29,7 +28,7 @@ func main() {
 	}
 
 	if llmProvider.BaseURL == "" || llmProvider.APIKey == "" {
-		log.Fatal("provider config missing")
+		log.Fatal("Missing LLM_PROVIDER_URL or LLM_PROVIDER_KEY")
 	}
 
 	redisAddr := os.Getenv("REDIS_ADDR")
@@ -40,23 +39,14 @@ func main() {
 
 	relayProxy, err := proxy.NewRelayProxy(llmProvider, rdb)
 	if err != nil {
-		log.Fatalf("proxy init failed: %v", err)
+		log.Fatalf("Failed to create proxy: %v", err)
 	}
 
 	mux := http.NewServeMux()
-
-	// OpenAI-compatible endpoint
 	mux.HandleFunc("/v1/chat/completions", proxy.HandlerWrapper(relayProxy, rdb))
-
-	// Anthropic Messages API endpoint (for Claude Code)
-	mux.HandleFunc("/v1/messages", proxy.AnthropicHandler(relayProxy, rdb))
-
-	// Anthropic Models API endpoint (for Claude Code model validation)
-	mux.HandleFunc("/v1/models", proxy.AnthropicModelsHandler())
-
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, "status: active")
+		fmt.Fprint(w, "ok")
 	})
 
 	port := os.Getenv("RELAY_PORT")
@@ -67,15 +57,18 @@ func main() {
 	server := &http.Server{
 		Addr:         ":" + port,
 		Handler:      loggingMiddleware(mux),
-		ReadTimeout:  10 * time.Second,
+		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 5 * time.Minute,
 	}
 
-	fmt.Printf("10x relay listening on :%s\n", port)
-	fmt.Printf("OpenAI endpoint: /v1/chat/completions\n")
-	fmt.Printf("Anthropic endpoint: /v1/messages (Claude Code compatible)\n")
+	fmt.Println("==================================================")
+	fmt.Println("Qwen Code Relay Server")
+	fmt.Printf("Listening on :%s\n", port)
+	fmt.Println("Endpoint: POST /v1/chat/completions")
+	fmt.Println("Model: Qwen/Qwen3-Coder-Next-FP8")
+	fmt.Println("==================================================")
 
 	if err := server.ListenAndServe(); err != nil {
-		log.Fatalf("server failure: %s", err)
+		log.Fatalf("Server failed: %s", err)
 	}
 }
