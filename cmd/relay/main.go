@@ -62,10 +62,10 @@ func main() {
 	}
 
 	fmt.Println("==================================================")
-	fmt.Println("Qwen Code Relay Server")
+	fmt.Println("MiniMax M2.5 Relay Server by Laith AbuJaafar")
 	fmt.Printf("Listening on :%s\n", port)
 	fmt.Println("Endpoint: POST /v1/chat/completions")
-	fmt.Println("Model: Qwen/Qwen3-Coder-Next-FP8")
+	fmt.Println("Model: MiniMax M2.5 FP4 (196.6K context)")
 	fmt.Println("==================================================")
 
 	if err := server.ListenAndServe(); err != nil {
