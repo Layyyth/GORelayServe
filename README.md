@@ -1,12 +1,14 @@
-# Qwen Code Relay
+# MiniMax M2.5 Relay Server
 
-A lightweight OpenAI-compatible relay server for [Qwen Code](https://qwen-code.com/) (Qwen3-235B). Caches responses with Redis for faster, cheaper development.
+A lightweight OpenAI-compatible relay server for [MiniMaxAI/MiniMax-M2.5](https://www.together.ai/models/MiniMaxAI-MiniMax-M2.5) via Together AI. Features rules injection and model mapping for seamless integration with opencode and other OpenAI-compatible tools.
 
 ## Quick Start
 
-### 1. Configure
+### 1. Clone and Configure
 
 ```bash
+git clone https://github.com/Layyith/GORelayServe.git
+cd GORelayServe
 cp .env.example .env
 # Edit .env and add your Together AI API key
 ```
@@ -17,49 +19,71 @@ cp .env.example .env
 docker compose up -d
 ```
 
-### 3. Use
+### 3. Configure Opencode
 
-Point any OpenAI-compatible client to `http://localhost:8080/v1/chat/completions`
+Add to `~/.opencode/opencode.json`:
 
-```bash
-# Example with curl
-curl http://localhost:8080/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "gpt-4",
-    "messages": [{"role": "user", "content": "Hello"}]
-  }'
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "go-relay": {
+      "name": "Go Relay (Together AI)",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "http://localhost:8080/v1",
+        "apiKey": "dummy"
+      },
+      "models": {
+        "gpt-4": {
+          "name": "MiniMax M2.5 (Together AI)",
+          "options": { "model": "gpt-4" },
+          "limit": { "context": 196608, "output": 8192 }
+        }
+      }
+    }
+  },
+  "model": "go-relay/gpt-4"
+}
 ```
 
-Any model name you request gets mapped to `Qwen/Qwen3-235B-A22B-Instruct`.
+### 4. Use
+
+```bash
+opencode
+```
+
+Or test with curl:
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-4","messages":[{"role":"user","content":"Hello"}]}'
+```
+
+Any model name you request gets mapped to `MiniMaxAI/MiniMax-M2.5`.
 
 ## Features
 
 - **OpenAI Compatible**: Drop-in replacement for OpenAI API
-- **Model Mapping**: All requests go to Qwen Code (235B params, great for coding)
-- **Redis Caching**: 7-day cache for non-streaming requests
+- **Model Mapping**: All requests go to MiniMax M2.5 (456B MoE, great for coding)
+- **Rules Injection**: Automatically prepends rules.md to system messages
 - **Streaming Support**: Full SSE streaming for real-time responses
+- **Redis Caching**: Optional caching layer (currently disabled for streaming)
 
 ## Architecture
 
 ```
-Your App (OpenAI format)
-      │ POST /v1/chat/completions
-      ▼
-  Qwen Relay (localhost:8080)
-      │ 1. Map any model → Qwen Code
-      │ 2. Check Redis cache
-      │ 3. Forward to Together AI
-      ▼
-   Together AI (Qwen Code)
-      │
-      │ Response
-      ▼
-  Qwen Relay
-      │ Cache if not streaming
-      ▼
-Your App (OpenAI format)
+┌──────────┐      ┌─────────────┐      ┌─────────────────┐      ┌──────────┐
+│ opencode │ ───► │ Go Relay    │ ───► │ Together AI     │ ───► │ MiniMax  │
+│ (client) │      │ (localhost) │      │ (together.xyz)  │      │ M2.5     │
+└──────────┘      └─────────────┘      └─────────────────┘      └──────────┘
 ```
+
+1. **Opencode** sends OpenAI-format request to `localhost:8080`
+2. **Go Relay** injects rules from `rules.md` and maps model name
+3. **Together AI** routes to MiniMax M2.5 inference
+4. **Streaming response** flows back through relay to client
 
 ## Endpoints
 
@@ -74,7 +98,7 @@ Your App (OpenAI format)
 |----------|-------------|---------|
 | `LLM_PROVIDER_URL` | Together AI endpoint | `https://api.together.xyz` |
 | `LLM_PROVIDER_KEY` | Together AI API key | Required |
-| `REDIS_ADDR` | Redis connection | `localhost:6379` |
+| `REDIS_ADDR` | Redis connection | `redis:6379` |
 
 ## Docker Compose
 
@@ -91,12 +115,18 @@ services:
       - LLM_PROVIDER_URL=https://api.together.xyz
       - LLM_PROVIDER_KEY=${TOGETHER_API_KEY}
       - REDIS_ADDR=redis:6379
+    volumes:
+      - ./rules.md:/app/rules.md:ro
 ```
 
-## Why Qwen Code?
+## Why MiniMax M2.5?
 
-- **235B parameters** - Powerful for coding tasks
-- **A22B activation** - Efficient inference (only 22B active at a time)
-- **OpenAI compatible** - No translation layer needed
-- **Faster than DeepSeek-V3.1** - No 685B parameter cold starts
-- **Tool calling** - Native function calling support
+- **456B parameters** - Massive MoE model for coding
+- **196K context** - Long conversations without truncation
+- **Fast inference** - Together AI optimized infrastructure
+- **Reasoning + Response** - Shows thinking process before answering
+- **Cheap** - ~$0.80/million input tokens
+
+## Author
+
+Created by **Laith AbuJaafar**
