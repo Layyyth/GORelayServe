@@ -97,10 +97,10 @@ func adjustMaxTokens(reqData map[string]interface{}) {
 	estimatedInput := estimateTokens(messages)
 	requestedMax, _ := reqData["max_tokens"].(float64)
 
-	// If input > 180k, force max_tokens to 4k to fit in 196k limit
-	if estimatedInput > 180000 && requestedMax > 4000 {
-		reqData["max_tokens"] = 4000
-		log.Printf("[ADJUST] Input %d tokens, reduced max_tokens to 4000", estimatedInput)
+	// If input > 180k, cap max_tokens to 8k (model supports 8k output)
+	if estimatedInput > 180000 && requestedMax > 8000 {
+		reqData["max_tokens"] = 8000
+		log.Printf("[ADJUST] Input %d tokens, capped max_tokens to 8000", estimatedInput)
 	}
 }
 
