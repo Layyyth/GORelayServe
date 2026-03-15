@@ -76,18 +76,18 @@ func truncateLargeMessages(messages []interface{}) []interface{} {
 
 func truncateContext(reqData map[string]interface{}) {
 	messages, ok := reqData["messages"].([]interface{})
-	if !ok || len(messages) <= 20 {
+	if !ok || len(messages) <= 8 {
 		return
 	}
 
 	totalTokens := estimateTokens(messages)
 
-	// If > 180k tokens, keep only last 20 messages
+	// If > 180k tokens, keep only last 8 messages
 	if totalTokens > 180000 {
-		log.Printf("[TRUNCATE] Context %d tokens > 180k, keeping last 20 messages", totalTokens)
-		// Keep system message (index 0) + last 19 messages
+		log.Printf("[TRUNCATE] Context %d tokens > 180k, keeping last 8 messages", totalTokens)
+		// Keep system message (index 0) + last 7 messages
 		newMessages := []interface{}{messages[0]}
-		newMessages = append(newMessages, messages[len(messages)-19:]...)
+		newMessages = append(newMessages, messages[len(messages)-7:]...)
 		reqData["messages"] = newMessages
 	}
 }
