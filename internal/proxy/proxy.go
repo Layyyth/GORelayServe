@@ -44,13 +44,7 @@ func NewRelayProxy(p Provider, rdb *cache.Cache) (*httputil.ReverseProxy, error)
 	return proxy, nil
 }
 
-func truncateMessages(reqData map[string]interface{}) {
-	messages, ok := reqData["messages"].([]interface{})
-	if !ok || len(messages) <= 10 {
-		return
-	}
-
-	// Estimate tokens (4 chars ≈ 1 token)
+func estimateTokens(messages []interface{}) int {
 	totalChars := 0
 	for _, msg := range messages {
 		if m, ok := msg.(map[string]interface{}); ok {
@@ -59,36 +53,48 @@ func truncateMessages(reqData map[string]interface{}) {
 			}
 		}
 	}
+	return totalChars / 4
+}
 
-	estimatedTokens := totalChars / 4
+func truncateLargeMessages(messages []interface{}) []interface{} {
+	maxMsgTokens := 20000 // 20k tokens per message
+	maxChars := maxMsgTokens * 4
 
-	// If >150k estimated, keep system + last 10 messages
-	if estimatedTokens > 150000 {
-		log.Printf("[TRUNCATE] Context %d tokens -> trimming to last 10 messages", estimatedTokens)
-
-		newMessages := []interface{}{messages[0]} // Keep system message
-		// Keep last 9 user/assistant messages
-		start := len(messages) - 9
-		if start < 1 {
-			start = 1
+	for i, msg := range messages {
+		if m, ok := msg.(map[string]interface{}); ok {
+			if content, ok := m["content"].(string); ok {
+				if len(content) > maxChars {
+					m["content"] = content[:maxChars] + "\n\n[...content truncated due to length]"
+					messages[i] = m
+					log.Printf("[TRUNCATE] Message %d exceeded 20k tokens, truncated", i)
+				}
+			}
 		}
-		newMessages = append(newMessages, messages[start:]...)
+	}
+	return messages
+}
+
+func truncateContext(reqData map[string]interface{}) {
+	messages, ok := reqData["messages"].([]interface{})
+	if !ok || len(messages) <= 20 {
+		return
+	}
+
+	totalTokens := estimateTokens(messages)
+
+	// If > 180k tokens, keep only last 20 messages
+	if totalTokens > 180000 {
+		log.Printf("[TRUNCATE] Context %d tokens > 180k, keeping last 20 messages", totalTokens)
+		// Keep system message (index 0) + last 19 messages
+		newMessages := []interface{}{messages[0]}
+		newMessages = append(newMessages, messages[len(messages)-19:]...)
 		reqData["messages"] = newMessages
 	}
 }
 
 func adjustMaxTokens(reqData map[string]interface{}) {
 	messages, _ := reqData["messages"].([]interface{})
-	totalChars := 0
-	for _, msg := range messages {
-		if m, ok := msg.(map[string]interface{}); ok {
-			if content, ok := m["content"].(string); ok {
-				totalChars += len(content)
-			}
-		}
-	}
-
-	estimatedInput := totalChars / 4
+	estimatedInput := estimateTokens(messages)
 	requestedMax, _ := reqData["max_tokens"].(float64)
 
 	// If input > 180k, force max_tokens to 4k to fit in 196k limit
@@ -108,8 +114,16 @@ func HandlerWrapper(proxy *httputil.ReverseProxy, rdb *cache.Cache) http.Handler
 			return
 		}
 
-		// Context management
-		truncateMessages(reqData)
+		// Get messages
+		messages, _ := reqData["messages"].([]interface{})
+
+		// Truncate individual large messages (>20k tokens)
+		messages = truncateLargeMessages(messages)
+
+		// Truncate entire context if >180k tokens (keep last 20)
+		truncateContext(reqData)
+
+		// Adjust max_tokens if needed
 		adjustMaxTokens(reqData)
 
 		// Map model name
@@ -145,7 +159,6 @@ func HandlerWrapper(proxy *httputil.ReverseProxy, rdb *cache.Cache) http.Handler
 }
 
 func handleStreaming(w http.ResponseWriter, r *http.Request, body []byte, proxy *httputil.ReverseProxy, rdb *cache.Cache, cacheKey string) {
-	// Create request to backend
 	targetURL := os.Getenv("LLM_PROVIDER_URL") + "/v1/chat/completions"
 
 	req, err := http.NewRequest("POST", targetURL, bytes.NewReader(body))
@@ -159,7 +172,6 @@ func handleStreaming(w http.ResponseWriter, r *http.Request, body []byte, proxy 
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("Accept-Encoding", "identity")
 
-	// Make request with timeout
 	client := &http.Client{Timeout: 5 * time.Minute}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -176,13 +188,11 @@ func handleStreaming(w http.ResponseWriter, r *http.Request, body []byte, proxy 
 		return
 	}
 
-	// Set streaming headers
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 
-	// Stream the response and collect for caching
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		log.Printf("[ERROR] ResponseWriter doesn't support flushing")
@@ -194,7 +204,6 @@ func handleStreaming(w http.ResponseWriter, r *http.Request, body []byte, proxy 
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line != "" {
-			// Extract content from SSE for caching
 			if strings.HasPrefix(line, "data: ") {
 				data := strings.TrimPrefix(line, "data: ")
 				if data != "[DONE]" {
@@ -221,14 +230,12 @@ func handleStreaming(w http.ResponseWriter, r *http.Request, body []byte, proxy 
 		log.Printf("[ERROR] Scanner error: %v", err)
 	}
 
-	// Cache the aggregated response
 	if fullContent.Len() > 0 {
 		go rdb.Set(context.Background(), cacheKey, buildCachedResponse(fullContent.String()), 7*24*time.Hour)
 	}
 }
 
 func handleNonStreaming(w http.ResponseWriter, r *http.Request, body []byte, proxy *httputil.ReverseProxy, rdb *cache.Cache, cacheKey string) {
-	// Create request to backend
 	targetURL := os.Getenv("LLM_PROVIDER_URL") + "/v1/chat/completions"
 
 	req, err := http.NewRequest("POST", targetURL, bytes.NewReader(body))
@@ -249,14 +256,12 @@ func handleNonStreaming(w http.ResponseWriter, r *http.Request, body []byte, pro
 	}
 	defer resp.Body.Close()
 
-	// Read response
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		http.Error(w, `{"error": "failed to read response"}`, http.StatusInternalServerError)
 		return
 	}
 
-	// Log token usage
 	var apiResp map[string]interface{}
 	if err := json.Unmarshal(respBody, &apiResp); err == nil {
 		if usage, ok := apiResp["usage"].(map[string]interface{}); ok {
@@ -267,10 +272,8 @@ func handleNonStreaming(w http.ResponseWriter, r *http.Request, body []byte, pro
 		}
 	}
 
-	// Cache response
 	go rdb.Set(context.Background(), cacheKey, string(respBody), 7*24*time.Hour)
 
-	// Return response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
 	w.Write(respBody)
