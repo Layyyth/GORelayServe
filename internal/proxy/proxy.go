@@ -1,10 +1,8 @@
 package proxy
 
 import (
-	"GoRelayServe/internal/cache"
 	"bufio"
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"log"
@@ -12,7 +10,6 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
-	"strings"
 	"time"
 )
 
@@ -23,7 +20,7 @@ type Provider struct {
 
 var defaultModel = "MiniMaxAI/MiniMax-M2.5"
 
-func NewRelayProxy(p Provider, rdb *cache.Cache) (*httputil.ReverseProxy, error) {
+func NewRelayProxy(p Provider) (*httputil.ReverseProxy, error) {
 	target, err := url.Parse(p.BaseURL)
 	if err != nil {
 		return nil, err
@@ -85,7 +82,6 @@ func truncateContext(reqData map[string]interface{}) {
 	// If > 180k tokens, keep only last 8 messages
 	if totalTokens > 180000 {
 		log.Printf("[TRUNCATE] Context %d tokens > 180k, keeping last 8 messages", totalTokens)
-		// Keep system message (index 0) + last 7 messages
 		newMessages := []interface{}{messages[0]}
 		newMessages = append(newMessages, messages[len(messages)-7:]...)
 		reqData["messages"] = newMessages
@@ -104,7 +100,7 @@ func adjustMaxTokens(reqData map[string]interface{}) {
 	}
 }
 
-func HandlerWrapper(proxy *httputil.ReverseProxy, rdb *cache.Cache) http.HandlerFunc {
+func HandlerWrapper(proxy *httputil.ReverseProxy) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 
@@ -120,7 +116,7 @@ func HandlerWrapper(proxy *httputil.ReverseProxy, rdb *cache.Cache) http.Handler
 		// Truncate individual large messages (>20k tokens)
 		messages = truncateLargeMessages(messages)
 
-		// Truncate entire context if >180k tokens (keep last 20)
+		// Truncate entire context if >180k tokens (keep last 8)
 		truncateContext(reqData)
 
 		// Adjust max_tokens if needed
@@ -138,27 +134,18 @@ func HandlerWrapper(proxy *httputil.ReverseProxy, rdb *cache.Cache) http.Handler
 
 		modifiedBody, _ := json.Marshal(reqData)
 
-		// Check cache for all requests
-		cacheKey := rdb.GenerateKey(modifiedBody)
-		if cached, err := rdb.Get(r.Context(), cacheKey); err == nil && cached != "" {
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(cached))
-			log.Printf("[CACHE HIT]")
-			return
-		}
-
 		if isStream {
 			log.Printf("[STREAM] %s -> %s", originalModel, defaultModel)
-			handleStreaming(w, r, modifiedBody, proxy, rdb, cacheKey)
+			handleStreaming(w, r, modifiedBody, proxy)
 			return
 		}
 
 		log.Printf("[REQUEST] %s -> %s", originalModel, defaultModel)
-		handleNonStreaming(w, r, modifiedBody, proxy, rdb, cacheKey)
+		handleNonStreaming(w, r, modifiedBody, proxy)
 	}
 }
 
-func handleStreaming(w http.ResponseWriter, r *http.Request, body []byte, proxy *httputil.ReverseProxy, rdb *cache.Cache, cacheKey string) {
+func handleStreaming(w http.ResponseWriter, r *http.Request, body []byte, proxy *httputil.ReverseProxy) {
 	targetURL := os.Getenv("LLM_PROVIDER_URL") + "/v1/chat/completions"
 
 	req, err := http.NewRequest("POST", targetURL, bytes.NewReader(body))
@@ -199,28 +186,10 @@ func handleStreaming(w http.ResponseWriter, r *http.Request, body []byte, proxy 
 		return
 	}
 
-	var fullContent strings.Builder
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line != "" {
-			if strings.HasPrefix(line, "data: ") {
-				data := strings.TrimPrefix(line, "data: ")
-				if data != "[DONE]" {
-					var chunk map[string]interface{}
-					if err := json.Unmarshal([]byte(data), &chunk); err == nil {
-						if choices, ok := chunk["choices"].([]interface{}); ok && len(choices) > 0 {
-							if choice, ok := choices[0].(map[string]interface{}); ok {
-								if delta, ok := choice["delta"].(map[string]interface{}); ok {
-									if content, ok := delta["content"].(string); ok {
-										fullContent.WriteString(content)
-									}
-								}
-							}
-						}
-					}
-				}
-			}
 			w.Write([]byte(line + "\n\n"))
 			flusher.Flush()
 		}
@@ -229,13 +198,9 @@ func handleStreaming(w http.ResponseWriter, r *http.Request, body []byte, proxy 
 	if err := scanner.Err(); err != nil {
 		log.Printf("[ERROR] Scanner error: %v", err)
 	}
-
-	if fullContent.Len() > 0 {
-		go rdb.Set(context.Background(), cacheKey, buildCachedResponse(fullContent.String()), 7*24*time.Hour)
-	}
 }
 
-func handleNonStreaming(w http.ResponseWriter, r *http.Request, body []byte, proxy *httputil.ReverseProxy, rdb *cache.Cache, cacheKey string) {
+func handleNonStreaming(w http.ResponseWriter, r *http.Request, body []byte, proxy *httputil.ReverseProxy) {
 	targetURL := os.Getenv("LLM_PROVIDER_URL") + "/v1/chat/completions"
 
 	req, err := http.NewRequest("POST", targetURL, bytes.NewReader(body))
@@ -272,35 +237,7 @@ func handleNonStreaming(w http.ResponseWriter, r *http.Request, body []byte, pro
 		}
 	}
 
-	go rdb.Set(context.Background(), cacheKey, string(respBody), 7*24*time.Hour)
-
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
 	w.Write(respBody)
-}
-
-func buildCachedResponse(content string) string {
-	resp := map[string]interface{}{
-		"id":      "chatcmpl-cached",
-		"object":  "chat.completion",
-		"created": time.Now().Unix(),
-		"model":   defaultModel,
-		"choices": []map[string]interface{}{
-			{
-				"index": 0,
-				"message": map[string]interface{}{
-					"role":    "assistant",
-					"content": content,
-				},
-				"finish_reason": "stop",
-			},
-		},
-		"usage": map[string]interface{}{
-			"prompt_tokens":     0,
-			"completion_tokens": len(content) / 4,
-			"total_tokens":      len(content) / 4,
-		},
-	}
-	data, _ := json.Marshal(resp)
-	return string(data)
 }

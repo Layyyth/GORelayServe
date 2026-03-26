@@ -1,7 +1,6 @@
 package main
 
 import (
-	"GoRelayServe/internal/cache"
 	"GoRelayServe/internal/proxy"
 	"fmt"
 	"log"
@@ -31,19 +30,13 @@ func main() {
 		log.Fatal("Missing LLM_PROVIDER_URL or LLM_PROVIDER_KEY")
 	}
 
-	redisAddr := os.Getenv("REDIS_ADDR")
-	if redisAddr == "" {
-		redisAddr = "localhost:6379"
-	}
-	rdb := cache.NewCache(redisAddr)
-
-	relayProxy, err := proxy.NewRelayProxy(llmProvider, rdb)
+	relayProxy, err := proxy.NewRelayProxy(llmProvider)
 	if err != nil {
 		log.Fatalf("Failed to create proxy: %v", err)
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/chat/completions", proxy.HandlerWrapper(relayProxy, rdb))
+	mux.HandleFunc("/v1/chat/completions", proxy.HandlerWrapper(relayProxy))
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, "ok")
@@ -65,7 +58,7 @@ func main() {
 	fmt.Println("MiniMax M2.5 Relay Server by Laith AbuJaafar")
 	fmt.Printf("Listening on :%s\n", port)
 	fmt.Println("Endpoint: POST /v1/chat/completions")
-	fmt.Println("Model: MiniMax M2.5 FP4 (196.6K context)")
+	fmt.Println("Model: MiniMax M2.5 (192K context)")
 	fmt.Println("==================================================")
 
 	if err := server.ListenAndServe(); err != nil {
