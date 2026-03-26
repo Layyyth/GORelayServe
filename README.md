@@ -1,34 +1,36 @@
-# MiniMax M2.5 Relay Server
+# LLM Relay Server
 
-An OpenAI-compatible API relay server for [MiniMaxAI/MiniMax-M2.5](https://www.together.ai/models/MiniMaxAI-MiniMax-M2.5) via [Together AI](https://www.together.ai/). Provides intelligent context management for long coding sessions while leveraging Together AI's efficient inference infrastructure.
+An **OpenAI-compatible API relay server** with intelligent context management for long coding sessions. Works with any LLM provider (Together AI, OpenAI, Anthropic, etc.) and any model. Prevents context overflow errors while providing middleware capabilities like authentication, logging, and rate limiting.
+
+> **Default Configuration:** This relay ships with [MiniMaxAI/MiniMax-M2.5](https://www.together.ai/models/MiniMaxAI-MiniMax-M2.5) via [Together AI](https://www.together.ai/) as the default model, but **can be configured to use any model** by changing one line of code.
 
 ## Why This Relay?
 
 ### The Problem
 
-Modern AI coding assistants (like [OpenCode](https://opencode.ai/)) maintain long conversation histories. When these exceed model context limits (~192k tokens for MiniMax M2.5), one of three things happen:
+Modern AI coding assistants (like [OpenCode](https://opencode.ai/)) maintain long conversation histories. When these exceed model context limits (~100k-200k tokens depending on model), one of three things happen:
 
 1. **Hard failure** - Request rejected with "context too long" error
-2. **Silent truncation** - Provider drops old messages without warning
+2. **Silent truncation** - Provider drops old messages without warning  
 3. **Expensive context loss** - Every request reprocesses full history from scratch
 
 ### The Solution
 
-This relay acts as a **middleware layer** between your AI client and Together AI, providing:
+This relay acts as a **model-agnostic middleware layer** between your AI client and any LLM provider, providing:
 
 **Request Management:**
-- **Authentication handling** - Securely manages API keys, client sends "dummy", relay adds real key
-- **Rate limiting foundation** - Extensible middleware structure for adding rate limits
+- **Authentication handling** - Securely manages API keys, client sends "dummy", relay adds real provider key
+- **Rate limiting foundation** - Extensible middleware structure for adding custom rate limits
 - **Structured logging** - All requests logged with timestamps, token counts, and truncation events
-- **Model mapping** - Any OpenAI model name maps to MiniMax M2.5 (drop-in replacement)
+- **Model mapping** - Any OpenAI model name maps to your configured backend model
 
 **Context Intelligence:**
 - **Real-time context monitoring** - Estimates token count on every request
-- **Smart truncation** - Keeps system prompt + last 7 messages when >180k tokens
+- **Smart truncation** - Keeps system prompt + last 7 messages when approaching limits
 - **Message size protection** - Caps individual messages at 20k tokens
 - **Streaming support** - Full SSE streaming with proper error handling
 
-**Result:** Long coding sessions continue uninterrupted, with Together AI's [Cache-Aware Disaggregation](https://www.together.ai/blog/cache-aware-disaggregated-inference) providing 80% cost savings on repeated context via their KV-cache reuse.
+**Result:** Long coding sessions continue uninterrupted regardless of which model you use.
 
 **Result:** Long coding sessions continue uninterrupted, with Together AI's [Cache-Aware Disaggregation](https://www.together.ai/blog/cache-aware-disaggregated-inference) providing 80% cost savings on repeated context via their KV-cache reuse.
 
@@ -36,9 +38,10 @@ This relay acts as a **middleware layer** between your AI client and Together AI
 
 ```
 ┌─────────────┐      ┌─────────────────┐      ┌─────────────────┐      ┌─────────────┐
-│   OpenCode  │ ───► │   Go Relay      │ ───► │   Together AI   │ ───► │  MiniMax    │
-│   (Client)  │      │   (This Server) │      │   (Inference)   │      │  M2.5       │
-└─────────────┘      └─────────────────┘      └─────────────────┘      └─────────────┘
+│   OpenCode  │ ───► │   Go Relay      │ ───► │   LLM Provider  │ ───► │   Any LLM   │
+│   (Client)  │      │   (This Server) │      │  (Together AI,  │      │  (MiniMax,  │
+└─────────────┘      └─────────────────┘      │   OpenAI, etc)  │      │  GPT-4, etc)│
+                           │                  └─────────────────┘      └─────────────┘
                            │
                            ├─ 1. Receive OpenAI-format request
                            ├─ 2. Authentication & validation
@@ -46,21 +49,21 @@ This relay acts as a **middleware layer** between your AI client and Together AI
                            ├─ 4. Truncate if >180k tokens
                            ├─ 5. Cap individual messages >20k
                            ├─ 6. Structured logging
-                           ├─ 7. Map model name → MiniMax M2.5
-                           └─ 8. Forward to Together AI
+                           ├─ 7. Map model name → Configured backend
+                           └─ 8. Forward to LLM provider
 ```
 
 ### Middleware Layer Capabilities
 
-The relay acts as a **secure middleware layer** providing:
+The relay acts as a **model-agnostic secure middleware layer** providing:
 
 | Feature | Description | Benefit |
 |---------|-------------|---------|
-| **Authentication** | Client uses dummy key, relay injects real Together AI key | Secure credential management |
+| **Authentication** | Client uses dummy key, relay injects real provider key | Secure credential management |
 | **Request Logging** | Structured logs: method, path, tokens, truncations | Observability & debugging |
 | **Rate Limiting** | Extensible middleware (add your own limits) | Abuse prevention |
 | **Context Guardrails** | Enforces 180k total, 20k per-message limits | Prevents context overflow errors |
-| **Model Normalization** | Maps any model name to MiniMax M2.5 | OpenAI-compatible drop-in |
+| **Model Normalization** | Maps any model name to configured backend | OpenAI-compatible drop-in |
 | **Streaming Proxy** | Full SSE support with error handling | Real-time responses |
 | **Health Monitoring** | `/health` endpoint for load balancers | Production readiness |
 
@@ -176,11 +179,20 @@ curl http://localhost:8080/v1/chat/completions \
 
 ### Context Management Limits
 
-| Limit | Value | Behavior |
-|-------|-------|----------|
-| **Total context** | 180k tokens | Truncate to system + last 7 messages |
-| **Per-message** | 20k tokens | Truncate with `[...content truncated]` notice |
-| **Model max** | 192k tokens | Hard limit from MiniMax M2.5 |
+All limits are **configurable** in `internal/proxy/proxy.go`. Default values work for 192k context models:
+
+| Limit | Default | Behavior | Customize For... |
+|-------|---------|----------|------------------|
+| **Total context** | 180k tokens | Truncate to system + last 7 | 100k/128k context models |
+| **Per-message** | 20k tokens | Truncate with notice | Specific use cases |
+| **Messages kept** | 8 total | System + last 7 | More/less history |
+
+**Adjust limits in code** (`internal/proxy/proxy.go`):
+```go
+if totalTokens > 180000 {        // Change threshold
+    newMessages = messages[len(messages)-7:]  // Change 7 to keep more/less
+}
+```
 
 ## Features
 
@@ -195,7 +207,7 @@ curl http://localhost:8080/v1/chat/completions \
 - **✓ Smart truncation** - Keeps system prompt + last 7 messages when approaching 180k limit
 - **✓ Message size protection** - Caps individual messages at 20k tokens
 - **✓ Real-time token estimation** - Monitors context size on every request
-- **✓ Model mapping** - Any OpenAI model name maps to MiniMax M2.5
+- **✓ Model mapping** - Any OpenAI model name maps to your configured backend
 
 ### API Compatibility
 - **✓ OpenAI-compatible** - Drop-in replacement for OpenAI SDK
@@ -210,21 +222,38 @@ curl http://localhost:8080/v1/chat/completions \
 | `/v1/chat/completions` | POST | Chat completions (OpenAI-compatible) |
 | `/health` | GET | Health check (returns `ok`) |
 
-## Model Details
+## Using Different Models
 
-**MiniMax M2.5** (via Together AI):
-- **Parameters:** 456B MoE (Mixture of Experts)
-- **Context:** 192,000 tokens (~150k words)
-- **Output:** Up to 8,192 tokens
+This relay is **model-agnostic**. To use a different model, edit `internal/proxy/proxy.go`:
+
+```go
+// Change this line to any model supported by your provider
+var defaultModel = "meta-llama/Llama-3.3-70B-Instruct-Turbo"  // Example: Llama
+// var defaultModel = "Qwen/Qwen2.5-72B-Instruct-Turbo"        // Example: Qwen
+// var defaultModel = "gpt-4o"                                  // Example: OpenAI (via compatible endpoint)
+```
+
+Then rebuild and push:
+```bash
+docker build -t your-image:latest .
+docker push your-image:latest
+```
+
+### Default: MiniMax M2.5
+
+The relay ships with **MiniMax M2.5** as the default because:
+
+- **192k context** - Handles large codebases
+- **456B MoE architecture** - Efficient inference  
+- **Together AI CPD** - 80% cost savings on cached context ($0.06/M vs $0.30/M)
+- **No cold starts** - Unlike 600B+ parameter models
+
+**MiniMax M2.5 Specs:**
+- **Parameters:** 456B MoE
+- **Context:** 192,000 tokens
+- **Output:** Up to 8,192 tokens  
 - **Pricing:** $0.30/M input (new), $0.06/M input (cached), $1.20/M output
-- **Strengths:** Coding, reasoning, long-context understanding
-
-## Why MiniMax M2.5?
-
-- **Massive context:** 192k tokens handles large codebases
-- **MoE architecture:** Efficient inference (only activates relevant parameters)
-- **Cost effective:** 80% cheaper with Together AI's context caching
-- **No cold starts:** Unlike huge models that need minutes to warm up
+- **Best for:** Coding, reasoning, long-context tasks
 
 ## Troubleshooting
 
@@ -235,7 +264,7 @@ docker logs go_relay | grep TRUNCATE
 ```
 
 ### Model returns garbled tool calls
-MiniMax M2.5 has limited tool support. For file operations, ask the model to output content directly:
+Some models (like MiniMax M2.5) have limited tool support. For file operations, ask the model to output content directly:
 > "Output the markdown directly without using tools. I'll copy it myself."
 
 ### Check relay health
@@ -267,4 +296,4 @@ Created by **Laith AbuJaafar**
 
 ---
 
-*Leveraging Together AI's Cache-Aware Disaggregation for efficient long-context inference.*
+*Compatible with any OpenAI-compatible LLM provider. Ships with Together AI + MiniMax M2.5 as default configuration.*
