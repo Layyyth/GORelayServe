@@ -14,12 +14,21 @@ Modern AI coding assistants (like [OpenCode](https://opencode.ai/)) maintain lon
 
 ### The Solution
 
-This relay acts as an intelligent middleware that:
+This relay acts as a **middleware layer** between your AI client and Together AI, providing:
 
-- **Monitors context size** in real-time
-- **Smartly truncates** when approaching limits (keeps system prompt + last 7 messages)
-- **Protects against huge single messages** (20k token limit per message)
-- **Maps any model name** to MiniMax M2.5 (OpenAI-compatible drop-in)
+**Request Management:**
+- **Authentication handling** - Securely manages API keys, client sends "dummy", relay adds real key
+- **Rate limiting foundation** - Extensible middleware structure for adding rate limits
+- **Structured logging** - All requests logged with timestamps, token counts, and truncation events
+- **Model mapping** - Any OpenAI model name maps to MiniMax M2.5 (drop-in replacement)
+
+**Context Intelligence:**
+- **Real-time context monitoring** - Estimates token count on every request
+- **Smart truncation** - Keeps system prompt + last 7 messages when >180k tokens
+- **Message size protection** - Caps individual messages at 20k tokens
+- **Streaming support** - Full SSE streaming with proper error handling
+
+**Result:** Long coding sessions continue uninterrupted, with Together AI's [Cache-Aware Disaggregation](https://www.together.ai/blog/cache-aware-disaggregated-inference) providing 80% cost savings on repeated context via their KV-cache reuse.
 
 **Result:** Long coding sessions continue uninterrupted, with Together AI's [Cache-Aware Disaggregation](https://www.together.ai/blog/cache-aware-disaggregated-inference) providing 80% cost savings on repeated context via their KV-cache reuse.
 
@@ -32,12 +41,28 @@ This relay acts as an intelligent middleware that:
 └─────────────┘      └─────────────────┘      └─────────────────┘      └─────────────┘
                            │
                            ├─ 1. Receive OpenAI-format request
-                           ├─ 2. Estimate token count
-                           ├─ 3. Truncate if >180k tokens
-                           ├─ 4. Cap individual messages >20k
-                           ├─ 5. Map model name → MiniMax M2.5
-                           └─ 6. Forward to Together AI
+                           ├─ 2. Authentication & validation
+                           ├─ 3. Estimate token count
+                           ├─ 4. Truncate if >180k tokens
+                           ├─ 5. Cap individual messages >20k
+                           ├─ 6. Structured logging
+                           ├─ 7. Map model name → MiniMax M2.5
+                           └─ 8. Forward to Together AI
 ```
+
+### Middleware Layer Capabilities
+
+The relay acts as a **secure middleware layer** providing:
+
+| Feature | Description | Benefit |
+|---------|-------------|---------|
+| **Authentication** | Client uses dummy key, relay injects real Together AI key | Secure credential management |
+| **Request Logging** | Structured logs: method, path, tokens, truncations | Observability & debugging |
+| **Rate Limiting** | Extensible middleware (add your own limits) | Abuse prevention |
+| **Context Guardrails** | Enforces 180k total, 20k per-message limits | Prevents context overflow errors |
+| **Model Normalization** | Maps any model name to MiniMax M2.5 | OpenAI-compatible drop-in |
+| **Streaming Proxy** | Full SSE support with error handling | Real-time responses |
+| **Health Monitoring** | `/health` endpoint for load balancers | Production readiness |
 
 ### Context Management Flow
 
@@ -159,14 +184,24 @@ curl http://localhost:8080/v1/chat/completions \
 
 ## Features
 
-- **✓ OpenAI-compatible API** - Drop-in replacement for OpenAI SDK
+### Middleware & Security
+- **✓ Authentication proxy** - Secure API key handling (client dummy key → real provider key)
+- **✓ Structured logging** - Request/response logging with token counts and truncation events
+- **✓ Rate limiting ready** - Extensible middleware for adding custom rate limits
+- **✓ Health checks** - HTTP `/health` endpoint for load balancers and monitoring
+- **✓ Non-root container** - Runs as unprivileged user for production security
+
+### Context Management
+- **✓ Smart truncation** - Keeps system prompt + last 7 messages when approaching 180k limit
+- **✓ Message size protection** - Caps individual messages at 20k tokens
+- **✓ Real-time token estimation** - Monitors context size on every request
+- **✓ Model mapping** - Any OpenAI model name maps to MiniMax M2.5
+
+### API Compatibility
+- **✓ OpenAI-compatible** - Drop-in replacement for OpenAI SDK
 - **✓ Streaming support** - Full Server-Sent Events (SSE) for real-time responses
-- **✓ Context truncation** - Automatic management of long conversations
-- **✓ Message size protection** - Prevents single huge messages from breaking requests
-- **✓ Model mapping** - Any model name maps to MiniMax M2.5
+- **✓ Error handling** - Proper HTTP status codes and error messages
 - **✓ Cost optimized** - Leverages Together AI's CPD for 80% savings on cached input
-- **✓ Health checks** - HTTP `/health` endpoint for monitoring
-- **✓ Non-root container** - Runs as unprivileged user for security
 
 ## API Endpoints
 
